@@ -1,0 +1,6 @@
+boto3
+pandas
+requests
+django
+Jinja2
+dotenv

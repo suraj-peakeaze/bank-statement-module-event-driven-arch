@@ -1,0 +1,10 @@
+pdf2image
+PyPDF2
+boto3
+pandas
+Pillow
+azure-ai-documentintelligence
+azure-ai-formrecognizer
+google-genai
+django
+dotenv
