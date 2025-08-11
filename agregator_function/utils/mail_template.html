@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bank Statement Processing Complete</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px 20px;
+            text-align: center;
+            border-radius: 10px 10px 0 0;
+            margin: -20px -20px 30px -20px;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 300;
+        }
+
+        .content {
+            padding: 0 20px;
+        }
+
+        .success-icon {
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .success-icon::before {
+            content: "✓";
+            display: inline-block;
+            width: 60px;
+            height: 60px;
+            line-height: 60px;
+            background: #4CAF50;
+            color: white;
+            border-radius: 50%;
+            font-size: 30px;
+            font-weight: bold;
+        }
+
+        .info-box {
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            font-weight: bold;
+            color: #333;
+        }
+
+        .info-value {
+            color: #666;
+        }
+
+        .attachment-section {
+            background: #e8f5e8;
+            border: 2px dashed #4CAF50;
+            padding: 20px;
+            text-align: center;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+
+        .attachment-icon {
+            font-size: 48px;
+            color: #4CAF50;
+            margin-bottom: 10px;
+        }
+
+        .footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            border-radius: 0 0 10px 10px;
+            margin: 30px -20px -20px -20px;
+            border-top: 1px solid #dee2e6;
+        }
+
+        .footer p {
+            margin: 5px 0;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 12px 25px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+
+        .button:hover {
+            background: #0056b3;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                margin: 10px;
+                padding: 15px;
+            }
+
+            .info-row {
+                flex-direction: column;
+            }
+
+            .info-label,
+            .info-value {
+                margin: 2px 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Bank Statement Processing Complete</h1>
+        </div>
+
+        <div class="content">
+            <div class="success-icon"></div>
+
+            <h2>Processing Successful!</h2>
+            <p>Dear {{ recipient_name | default('Valued Customer') }},</p>
+
+            <p>We're pleased to inform you that your bank statement has been successfully processed and converted to CSV
+                format. The extracted data is now ready for your use.</p>
+
+            <div class="info-box">
+                <h3 style="margin-top: 0; color: #333;">Processing Details</h3>
+                <div class="info-row">
+                    <span class="info-label">File Name:</span>
+                    <span class="info-value">{{ original_filename | default('bank_statement.pdf') }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Processing Date:</span>
+                    <span class="info-value">{{ processing_date | default('Today') }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Records Extracted:</span>
+                    <span class="info-value">{{ record_count | default('Multiple') }} transactions</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Output Format:</span>
+                    <span class="info-value">CSV (Comma Separated Values)</span>
+                </div>
+            </div>
+
+            {% if download_url %}
+            <!-- DOWNLOAD LINK BLOCK -->
+            <div class="attachment-section">
+                <div class="attachment-icon">🔗</div>
+                <h3 style="margin: 10px 0; color: #4CAF50;">Download Your CSV File</h3>
+                <p>Your processed bank statement is ready. Click the button below to download your CSV file.</p>
+                <div style="margin-top: 15px;">
+                    <a href="{{ download_url }}" class="button">Download CSV</a>
+                </div>
+            </div>
+            {% else %}
+                <!-- ATTACHMENT BLOCK -->
+                <div class="attachment-section">
+                    <div class="attachment-icon">📎</div>
+                    <h3 style="margin: 10px 0; color: #4CAF50;">CSV File Attached</h3>
+                    <p>Your processed bank statement data is attached to this email as a CSV file. You can open it with
+                        Excel, Google Sheets, or any spreadsheet application.</p>
+                    <p><strong>Attachment:</strong> {{ csv_filename | default('processed_bank_statement.csv') }}</p>
+                </div>
+            {% endif %}
+        
+
+            <h3>What's Next?</h3>
+            <ul>
+                <li>Download and save the attached CSV file</li>
+                <li>Import the data into your preferred accounting or analysis software</li>
+                <li>Review the extracted transactions for accuracy</li>
+                <li>Contact us if you notice any discrepancies</li>
+            </ul>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{{ support_url | default('#') }}" class="button">Contact Support</a>
+                <a href="{{ dashboard_url | default('#') }}" class="button">View Dashboard</a>
+            </div>
+
+            <div
+                style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                <h4 style="margin-top: 0; color: #856404;">📋 Data Security Notice</h4>
+                <p style="margin-bottom: 0; color: #856404;">
+                    Your financial data has been processed securely. We
+                    recommend reviewing the extracted data and storing it safely. Delete this email and attachment after
+                    downloading if you have security concerns.</p>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
