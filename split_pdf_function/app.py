@@ -1,6 +1,7 @@
 import collections.abc
 from PyPDF2 import PdfReader
-from utils.dynamo_utils import update_record_table, get_items_from_record_table
+from botocore import retries
+from utils.dynamo_utils import update_azure_record_table, get_items_from_record_table
 
 collections.Sequence = collections.abc.Sequence
 
@@ -36,7 +37,8 @@ sqs = boto3.client("sqs")
 # Environment variables
 BUCKET = os.getenv("AWS_STORAGE_BUCKET_NAME")
 RECORD_TABLE = os.getenv("JOB_STATUS_TABLE")
-PROCESS_PAGE_QUEUE_URL = os.getenv("PROCESS_PAGE_QUEUE_URL")
+GEMINI_QUEUE_URL = os.getenv("GEMINI_QUEUE_URL")
+AZURE_QUEUE_URL = os.getenv("AZURE_QUEUE_URL")
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 
 
@@ -70,7 +72,6 @@ def extract_event_data(event):
     else:
         # Direct invocation
         job_id = event.get("job_id")
-        pdf_key = event.get("pdf_key")
 
     if not job_id:
         raise ValueError("job_id not found in event")
@@ -78,13 +79,19 @@ def extract_event_data(event):
     return job_id, pdf_key, bucket
 
 
-def send_sqs_message(
-    job_id, page_number, bucket, user_email, pdf_name, page_s3_key, length_of_pdf, table
+def send_sqs_message_to_azure_pipeline(
+    job_id,
+    page_number,
+    bucket,
+    user_email,
+    pdf_name,
+    page_s3_key,
+    length_of_pdf,
+    table,
 ):
     """Send SQS message for page processing"""
     sqs_message = {
         "job_id": job_id,
-        "page_id": f"{job_id}_{page_number}",
         "bucket": bucket,
         "user_email": user_email,
         "pdf_name": pdf_name,
@@ -95,7 +102,67 @@ def send_sqs_message(
 
     try:
         sqs.send_message(
-            QueueUrl=PROCESS_PAGE_QUEUE_URL,
+            QueueUrl=AZURE_QUEUE_URL,
+            MessageBody=json.dumps(sqs_message),
+        )
+        logger.info(f"Sent SQS message for page {page_number}")
+        return True
+    except Exception as e:
+        logger.error(f"Error sending SQS message for page {page_number}: {e}")
+
+        # Update page status to failed
+
+        try:
+            current = get_items_from_record_table(job_id, page_number)
+            retries = current.get("retries")
+            if current and current[0].get("status") != "COMPLETED":
+                status = "UN_PROCESSABLE" if retries >= 3 else "FAILED"
+                update_azure_record_table(
+                    job_id, page_number, {"status": status, "retries": retries}
+                )
+                # Send SQS message
+                send_sqs_message_to_azure_pipeline(
+                    job_id,
+                    page_number,
+                    bucket,
+                    user_email,
+                    pdf_name,
+                    page_s3_key,
+                    length_of_pdf,
+                    table,
+                )
+        except Exception as db_error:
+            logger.error(f"Error updating page status to FAILED: {db_error}")
+
+        return False
+
+
+def send_sqs_message_to_gemini_pipeline(
+    job_id,
+    page_number,
+    bucket,
+    user_email,
+    pdf_name,
+    page_s3_key,
+    length_of_pdf,
+    table,
+    processor,
+):
+    """Send SQS message for page processing"""
+    sqs_message = {
+        "job_id": job_id,
+        "bucket": bucket,
+        "user_email": user_email,
+        "pdf_name": pdf_name,
+        "page_number": page_number,
+        "page_key": page_s3_key,
+        "total_pages": length_of_pdf,
+        "processor": processor,
+    }
+
+    try:
+        sqs.send_message(
+            QueueUrl=GEMINI_QUEUE_URL,
             MessageBody=json.dumps(sqs_message),
         )
         logger.info(f"Sent SQS message for page {page_number}")
@@ -105,42 +172,28 @@ def send_sqs_message(
 
         # Update page status to failed
         try:
-            table.update_item(
-                Key={"page_id": f"{job_id}_{page_number}"},
-                UpdateExpression="SET #status = :status, #error = :error",
-                ExpressionAttributeNames={
-                    "#status": "status",
-                    "#error": "error",
-                },
-                ExpressionAttributeValues={
-                    ":status": "FAILED",
-                    ":error": str(e),
-                },
-            )
+            current = get_items_from_record_table(job_id, page_number)
+            retries = current.get("retries")
+            if current and current[0].get("status") != "COMPLETED":
+                status = "UN_PROCESSABLE" if retries >= 3 else "FAILED"
+                update_azure_record_table(
+                    job_id, page_number, {"status": status, "retries": retries}
+                )
+                # Send SQS message
+                send_sqs_message_to_gemini_pipeline(
+                    job_id,
+                    page_number,
+                    bucket,
+                    user_email,
+                    pdf_name,
+                    page_s3_key,
+                    length_of_pdf,
+                    table,
+                )
         except Exception as db_error:
             logger.error(f"Error updating page status to FAILED: {db_error}")
 
         return False
-
-
-def update_job_status_on_error(job_id, page_number, error, retries):
-    """Update job status when an error occurs"""
-    status = "UN_PROCESSABLE" if retries >= MAX_RETRIES else "FAILED"
-
-    error_record = {
-        "retries": retries,
-        "status": status,
-        "error": str(error),
-        "updated_at": datetime.utcnow().isoformat(),
-    }
-
-    try:
-        update_record_table(
-            job_id=job_id, page_number=page_number, update_data=error_record
-        )
-        logger.info(f"Updated job {job_id} with error status: {status}")
-    except ClientError as db_error:
-        logger.error(f"DynamoDB update error for job {job_id}: {db_error}")
 
 
 def lambda_handler(event, context):
@@ -217,7 +270,20 @@ def lambda_handler(event, context):
                     page_keys.append(page_s3_key)
 
                     # Send SQS message
-                    message_sent = send_sqs_message(
+                    table = "Job-Record-Table-For-Gemini"
+                    message_sent_to_gemini = send_sqs_message_to_gemini_pipeline(
+                        job_id,
+                        page_number,
+                        bucket,
+                        user_email,
+                        pdf_name,
+                        page_s3_key,
+                        length_of_pdf,
+                        table,
+                    )
+
+                    table = "Job-Record-Table-For-Azure"
+                    message_sent_to_azure = send_sqs_message_to_azure_pipeline(
                         job_id,
                         page_number,
                         bucket,
@@ -232,9 +298,10 @@ def lambda_handler(event, context):
                     final_status = (
                         "PROCESSING_PAGES" if successful_pages > 0 else "FAILED"
                     )
-                    record_updated = update_record_table(
+                    record_updated = update_azure_record_table(
                         job_id=job_id,
                         page_number=page_number,
+                        processor="azure+gemini pipeline",
                         update_data={
                             "status": final_status,
                             "job_id": job_id,
@@ -248,10 +315,18 @@ def lambda_handler(event, context):
                             "updated_at": datetime.utcnow().isoformat(),
                             "retries": current_retries,
                             "next": "ProcessPages",
+                            "calling_gemini_for_header_extraction": False,
+                            "gemini_header_extraction_completed": False,
+                            "calling_gemini_cleaning_process": False,
+                            "gemini_cleaning_process_completed": False,
                         },
                     )
 
-                    if record_updated and message_sent:
+                    if (
+                        record_updated
+                        and message_sent_to_gemini
+                        and message_sent_to_azure
+                    ):
                         successful_pages += 1
                     else:
                         failed_pages += 1
@@ -260,19 +335,6 @@ def lambda_handler(event, context):
                     logger.error(f"Error processing page {page_number}: {page_error}")
                     failed_pages += 1
                     continue
-
-            final_status = (
-                "PROCESSING_PAGES" if successful_pages == length_of_pdf else "FAILED"
-            )
-            update_record_table(
-                job_id=job_id,
-                page_number=0,
-                update_data={
-                    "status": final_status,
-                    "next": "ProcessPages",
-                    "length_of_pdf": length_of_pdf,
-                },
-            )
 
         # Clean up local file
         try:
@@ -299,9 +361,6 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.error(f"Error in split_pdf_handler: {str(e)}")
-
-        if job_id:
-            update_job_status_on_error(job_id, page_number, e, retries)
 
         # Re-raise the exception for Lambda error handling
         raise e

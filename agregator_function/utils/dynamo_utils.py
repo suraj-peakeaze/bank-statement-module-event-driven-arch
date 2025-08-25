@@ -6,7 +6,7 @@ from botocore.exceptions import ClientError
 # === Dynamo DB ===
 dynamodb = boto3.resource("dynamodb")
 d_table = os.getenv("JOB_STATUS_TABLE")
-table = dynamodb.Table(d_table)  # Name passed via env var
+table = dynamodb.Table(d_table)
 
 
 def get_items_from_record_0_table(job_id, page_number):
@@ -28,8 +28,9 @@ def get_items_from_record_0_table(job_id, page_number):
         raise e
 
 
-def get_items_from_record_table(job_id, page_number):
-    status = ["FAILED", "COMPLETE"]
+def get_items_from_record_table(job_id, page_number, table):
+    table = dynamodb.Table(table)
+    status = ["FAILED", "COMPLETED"]
     next = "final_aggregator"
 
     try:
@@ -47,11 +48,14 @@ def get_items_from_record_table(job_id, page_number):
         raise e
 
 
-def update_record_table(job_id: int, page_number: int, update_data: dict):
+def update_record_table(job_id: int, page_number: int, table: str, update_data: dict):
     """
     Update an existing record in DynamoDB without overwriting the whole item.
     Skips None values to avoid deleting attributes unintentionally.
     """
+
+    table = dynamodb.Table(table)
+
     if not job_id:
         raise ValueError("job_id is required to update the record")
 

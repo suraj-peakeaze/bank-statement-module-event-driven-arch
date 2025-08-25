@@ -9,7 +9,9 @@ from datetime import datetime
 import django
 from django.conf import settings
 from dotenv import load_dotenv
+from utils.logger_config import get_logger
 
+logger = get_logger(__name__)
 load_dotenv()
 
 if not settings.configured:
@@ -17,9 +19,9 @@ if not settings.configured:
         DEBUG=False,
         TEMPLATES=[
             {
-                'BACKEND': 'django.template.backends.django.DjangoTemplates',
-                'DIRS': ['templates'],
-                'APP_DIRS': True,
+                "BACKEND": "django.template.backends.django.DjangoTemplates",
+                "DIRS": ["templates"],
+                "APP_DIRS": True,
             }
         ],
     )
@@ -32,8 +34,8 @@ class EmailService:
         self.smtp_port = smtp_port
         self.smtp_user = os.getenv("SMTP_EMAIL")
         self.smtp_pass = os.getenv("SMTP_PASS")
-        print("EMAIL: ",os.getenv("SMTP_EMAIL"))
-        print("PASS:", bool(os.getenv("SMTP_PASS")))
+        logger.info("EMAIL: ", os.getenv("SMTP_EMAIL"))
+        logger.info("PASS:", bool(os.getenv("SMTP_PASS")))
 
     def _send_email(
         self,
@@ -69,21 +71,23 @@ class EmailService:
             with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port) as server:
                 server.login(self.smtp_user, self.smtp_pass)
                 if self.smtp_pass:
-                    print("[DEBUG] SMTP PASS EXISTS")
-                
+                    logger.info("[DEBUG] SMTP PASS EXISTS")
+
                 if self.smtp_user:
-                    print("[DEBUG] SMTP USER EXISTS")
+                    logger.info("[DEBUG] SMTP USER EXISTS")
                 server.send_message(msg)
             return True
         except smtplib.SMTPException as e:
             raise Exception(f"Error sending email: {str(e)}")
 
     def send_processing_complete_notification(
-            self,
-            user_email: str,
-            pdf_name: str,
-            page_count: int = 0,
-            download_url: str = None,
+        self,
+        user_email: str,
+        pdf_name: str,
+        processor_pipeline: str,
+        page_count: int = 0,
+        download_url: str = None,
+        job_id: int = 0,
     ):
         """Send bank statement processing completion notification with CSV attachment"""
 
@@ -92,12 +96,10 @@ class EmailService:
             "original_filename": pdf_name,
             "processing_date": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
             "record_count": page_count,
-            "csv_filename": (
-                pdf_name
-                if pdf_name
-                else "processed_bank_statement.csv"
-            ),
-            "download_url": download_url
+            "job_id": job_id,
+            "processor_pipeline": processor_pipeline,
+            "csv_filename": (pdf_name if pdf_name else "processed_bank_statement.csv"),
+            "download_url": download_url,
         }
 
         # Render email content using your template

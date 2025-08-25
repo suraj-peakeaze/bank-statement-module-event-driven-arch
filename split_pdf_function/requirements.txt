@@ -5,3 +5,4 @@ pandas
 Pillow
 django
 dotenv
+pycryptodome
