@@ -1,4 +1,5 @@
 pdf2image
+pycryptodome
 PyPDF2
 boto3
 pandas
@@ -8,3 +9,8 @@ azure-ai-formrecognizer
 google-genai
 django
 dotenv
+openai
+langfuse
+openinference-instrumentation-google-genai
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http

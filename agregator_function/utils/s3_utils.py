@@ -2,6 +2,10 @@ import boto3
 import os
 from io import BytesIO, IOBase
 import pandas as pd
+from utils.logger_config import get_logger
+
+logger = get_logger(__name__)
+
 
 # === Client Setup ===
 def get_s3_client():
@@ -16,6 +20,7 @@ def get_s3_client():
         else boto3.client("s3")
     )
 
+
 # === File Downloads ===
 def download_file(bucket, key, local_path):
     """
@@ -27,10 +32,11 @@ def download_file(bucket, key, local_path):
 
     try:
         s3.download_file(bucket, key, local_path)
-        print(f"✅ Downloaded s3://{bucket}/{key} to {local_path}")
+        logger.info(f"✅ Downloaded s3://{bucket}/{key} to {local_path}")
     except Exception as e:
-        print(f"❌ Failed to download s3://{bucket}/{key}: {e}")
+        logger.error(f"❌ Failed to download s3://{bucket}/{key}: {e}")
         raise
+
 
 def download_fileobj(bucket, key):
     """
@@ -42,11 +48,12 @@ def download_fileobj(bucket, key):
     try:
         s3.download_fileobj(bucket, key, buf)
         buf.seek(0)
-        print(f"✅ Downloaded s3://{bucket}/{key} to memory")
+        logger.info(f"✅ Downloaded s3://{bucket}/{key} to memory")
         return buf
     except Exception as e:
-        print(f"❌ Failed to download fileobj s3://{bucket}/{key}: {e}")
+        logger.error(f"❌ Failed to download fileobj s3://{bucket}/{key}: {e}")
         raise
+
 
 # === File Uploads ===
 def upload_file(local_path, bucket, key):
@@ -60,10 +67,11 @@ def upload_file(local_path, bucket, key):
 
     try:
         s3.upload_file(local_path, bucket, key)
-        print(f"✅ Uploaded {local_path} to s3://{bucket}/{key}")
+        logger.info(f"✅ Uploaded {local_path} to s3://{bucket}/{key}")
     except Exception as e:
-        print(f"❌ Failed to upload {local_path} to s3://{bucket}/{key}: {e}")
+        logger.error(f"❌ Failed to upload {local_path} to s3://{bucket}/{key}: {e}")
         raise
+
 
 def upload_fileobj(file_obj, bucket, key):
     """
@@ -77,10 +85,11 @@ def upload_fileobj(file_obj, bucket, key):
     file_obj.seek(0)
     try:
         s3.upload_fileobj(file_obj, bucket, key)
-        print(f"✅ Uploaded file object to s3://{bucket}/{key}")
+        logger.info(f"✅ Uploaded file object to s3://{bucket}/{key}")
     except Exception as e:
-        print(f"❌ Failed to upload file object to s3://{bucket}/{key}: {e}")
+        logger.error(f"❌ Failed to upload file object to s3://{bucket}/{key}: {e}")
         raise
+
 
 # === CSV Helpers ===
 def read_csv_from_s3(bucket, key):
@@ -89,6 +98,7 @@ def read_csv_from_s3(bucket, key):
     """
     buf = download_fileobj(bucket, key)
     return pd.read_csv(buf)
+
 
 def write_csv_to_s3(df, bucket, key):
     """

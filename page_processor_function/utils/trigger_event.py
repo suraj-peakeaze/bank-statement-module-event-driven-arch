@@ -1,7 +1,7 @@
-import boto3, os, json, logging
+import boto3, os, json
+from utils.logger_config import get_logger
 
-log = logging.getLogger()
-log.setLevel(logging.INFO)
+logger = get_logger(__name__)
 
 eventbridge = boto3.client("events")
 BUS = os.getenv("BUS_NAME")
@@ -9,10 +9,10 @@ BUS = os.getenv("BUS_NAME")
 
 def put_in_bridge(message: dict) -> bool:
     if not BUS:
-        log.error("Missing BUS_NAME env var")
+        logger.error("Missing BUS_NAME env var")
         return False
 
-    log.info(f"Event bus: {BUS}")
+    logger.info(f"Event bus: {BUS}")
     try:
         resp = eventbridge.put_events(
             Entries=[
@@ -24,8 +24,8 @@ def put_in_bridge(message: dict) -> bool:
                 }
             ]
         )
-        log.info(f"PutEvents response: {resp}")
+        logger.info(f"PutEvents response: {resp}")
         return resp.get("FailedEntryCount", 0) == 0
     except Exception as e:
-        log.exception("PutEvents failed")
+        logger.exception("PutEvents failed")
         return False

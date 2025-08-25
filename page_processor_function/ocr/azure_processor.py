@@ -5,10 +5,9 @@ from azure.core.credentials import AzureKeyCredential
 from azure.ai.formrecognizer import DocumentAnalysisClient
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 import pandas as pd
-import logging
+from utils.logger_config import get_logger
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = get_logger(__name__)
 # Azure credentials
 endpoint = os.getenv("AZURE_END_POINT") or os.getenv("AzureEndPoint")
 key = os.getenv("AZURE_SECRET_KEY") or os.getenv("AzureApiKey")

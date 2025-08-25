@@ -1,16 +1,11 @@
 import tempfile
-import os
-import sys
+import os, base64, time, sys, json
 import pandas as pd
-import logging
-import json
 from dotenv import load_dotenv
 from datetime import datetime
 
 load_dotenv()
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
 
 # Add parent directories to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -30,12 +25,16 @@ from utils.dynamo_utils import (
     get_items_from_record_table,
 )
 from utils.trigger_event import put_in_bridge
-import time
+from utils.logger_config import setup_logging, get_logger
 
 
 def lambda_handler(event, context):
-    job_id = None
-    page_number = None
+    job_id = event.get("job_id", "unknown")
+    page_number = event.get("page_number", "NA")
+
+    # Initialize logging (runs once per Lambda execution)
+    log_file = setup_logging(job_id, page_number)
+    logger = get_logger(__name__)
     page_s3_key = None
     bucket = None
     item = None
@@ -49,7 +48,6 @@ def lambda_handler(event, context):
     xml_s3_key = ""
     cleaned_s3_key = ""
     image_s3_key = ""
-    column_map = ""
 
     try:
         # Handle SQS wrapper
@@ -116,16 +114,26 @@ def lambda_handler(event, context):
             image_s3_key = f"images/{job_id}/page_{page_number}.png"
             upload_file(image_path, bucket, image_s3_key)
 
-            # Extract Headers
-            header, is_valid_page = extract_header_using_gemini(image=image_path)
-            if is_valid_page:
-                # Dict mapping index to header
-                index_to_header = {item["index"]: item["headers"] for item in header}
+            update_record_table(
+                job_id=job_id,
+                page_number=page_number,
+                update_data={
+                    "calling_gemini_for_page_validation": True,
+                },
+            )
 
-                # List of headers
-                headers_list = [item["headers"] for item in header]
-                column_map_with_index = index_to_header
-                column_map = headers_list
+            # Extract Headers
+            is_valid_page = extract_header_using_gemini(image=image_path)
+
+            update_record_table(
+                job_id=job_id,
+                page_number=page_number,
+                update_data={
+                    "gemini_page_validation_completed": True,
+                },
+            )
+
+            if is_valid_page:
 
                 # Azure OCR
                 temp_csv = os.path.join(temp_dir, f"page_{page_number}_raw.csv")
@@ -170,49 +178,48 @@ def lambda_handler(event, context):
                         f"Downloaded image not found: {downloaded_image_path}"
                     )
 
+                update_record_table(
+                    job_id=job_id,
+                    page_number=page_number,
+                    update_data={
+                        "calling_gemini_cleaning_process": True,
+                    },
+                )
+
                 gemini_agent = GeminiAgent()
                 gemini_response = gemini_agent.call_gemini(
-                    xml_data_from_s3, downloaded_image_path, column_map
+                    xml_data_from_s3, downloaded_image_path
+                )
+
+                update_record_table(
+                    job_id=job_id,
+                    page_number=page_number,
+                    update_data={
+                        "gemini_cleaning_process_completed": True,
+                    },
                 )
 
                 logger.info(
                     f"Got response from gemini in {type(gemini_response)} format, and final response is \n {gemini_response}"
                 )
 
-                cleaned_csv = os.path.join(temp_dir, f"page_{page_number}_cleaned.csv")
-                process_gemini_response(gemini_response, s3_raw_csv, cleaned_csv)
+                cleaned_csv_path = os.path.join(
+                    temp_dir, f"page_{page_number}_cleaned.csv"
+                )
+                process_gemini_response(gemini_response, cleaned_csv_path)
 
-                if os.path.exists(cleaned_csv):
+                if os.path.exists(cleaned_csv_path):
                     try:
-                        cleaned_df = pd.read_csv(cleaned_csv)
+                        cleaned_df = pd.read_csv(cleaned_csv_path)
+                        logger.info(f"Final CSV before upload:\n {cleaned_df}")
                         if not cleaned_df.empty:
                             cleaned_s3_key = (
                                 f"cleaned_csvs/{job_id}/page_{page_number}.csv"
                             )
-                            upload_file(cleaned_csv, bucket, cleaned_s3_key)
+                            upload_file(cleaned_csv_path, bucket, cleaned_s3_key)
                     except Exception as e:
                         logger.warning(f"Error reading cleaned CSV: {e}")
 
-        # Success update
-        # success_item = {
-        #     "page_number": page_number,
-        #     "status": "COMPLETED",
-        #     "updated_at": datetime.utcnow().isoformat(),
-        #     "cleaned_csv_key": cleaned_s3_key,
-        #     "xml_key": xml_s3_key,
-        #     "raw_csv_key": raw_csv_s3_key,
-        #     "image_key": image_s3_key,
-        #     "retries": retries,
-        #     "user_email": item.get("user_email", ""),
-        #     "next": "final_aggregator",
-        #     "header": header,
-        # }
-
-        # page_info = item.get("page_info", [])
-        # if not isinstance(page_info, list):
-        #     page_info = []
-        # page_info = [p for p in page_info if p.get("page_number") != page_number]
-        # page_info.append(success_item)
         print(
             f"""
                 "page_number": {page_number},
@@ -225,7 +232,6 @@ def lambda_handler(event, context):
                 "retries": 0,
                 "user_email": {item.get("user_email", "")},
                 "next": "final_aggregator",
-                "header": {column_map},
             """
         )
 
@@ -243,7 +249,7 @@ def lambda_handler(event, context):
                 "retries": retries,
                 "user_email": item.get("user_email", ""),
                 "next": "final_aggregator",
-                "header": column_map,
+                "is_valid": is_valid_page,
             },
         )
 
@@ -288,8 +294,12 @@ def lambda_handler(event, context):
             logger.error(f"Error in aggregation trigger: {str(e)}")
             # Don't fail the whole function - the page was processed successfully
 
-        # SUCCESS - Return successful response
+        # SUCCESS - Return successful response# Upload image to S3
+        log_s3_key = f"logs/{job_id}/log_{page_number}.log"
+        upload_file(log_file, bucket, log_s3_key)
+
         logger.info(f"Page {page_number} processing completed successfully")
+
         return {
             "statusCode": 200,
             "body": json.dumps(
@@ -304,6 +314,11 @@ def lambda_handler(event, context):
     except Exception as e:
         logger.error(f"Error processing page {page_number}: {str(e)}")
         retries += 1
+        # SUCCESS - Return successful response# Upload image to S3
+        log_s3_key = f"logs/{job_id}/log_{page_number}.log"
+        upload_file(log_file, bucket, log_s3_key)
+
+        logger.info(f"Page {page_number} processing completed successfully")
 
         current = get_items_from_record_table(job_id, page_number)
         if current and current[0].get("status") != "COMPLETED":

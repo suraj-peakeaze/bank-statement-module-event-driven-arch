@@ -3,12 +3,12 @@ import os
 from io import BytesIO, IOBase
 import pandas as pd
 from dotenv import load_dotenv
-import logging
+from utils.logger_config import get_logger
+
+logger = get_logger(__name__)
 import json
 
 load_dotenv()
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
 
 sqs = boto3.client("sqs")
 

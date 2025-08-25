@@ -1,5 +1,6 @@
 import collections.abc
 from PyPDF2 import PdfReader
+from botocore import retries
 from utils.dynamo_utils import update_record_table, get_items_from_record_table
 
 collections.Sequence = collections.abc.Sequence
@@ -84,7 +85,6 @@ def send_sqs_message(
     """Send SQS message for page processing"""
     sqs_message = {
         "job_id": job_id,
-        "page_id": f"{job_id}_{page_number}",
         "bucket": bucket,
         "user_email": user_email,
         "pdf_name": pdf_name,
@@ -104,19 +104,25 @@ def send_sqs_message(
         logger.error(f"Error sending SQS message for page {page_number}: {e}")
 
         # Update page status to failed
+
         try:
-            table.update_item(
-                Key={"page_id": f"{job_id}_{page_number}"},
-                UpdateExpression="SET #status = :status, #error = :error",
-                ExpressionAttributeNames={
-                    "#status": "status",
-                    "#error": "error",
-                },
-                ExpressionAttributeValues={
-                    ":status": "FAILED",
-                    ":error": str(e),
-                },
-            )
+            current = get_items_from_record_table(job_id, page_number)
+            retries = current.get("retries")
+            if current and current[0].get("status") != "COMPLETED":
+                status = "UN_PROCESSABLE" if retries >= 3 else "FAILED"
+                update_record_table(
+                    job_id, page_number, {"status": status, "retries": retries}
+                )  # Send SQS message
+                message_sent = send_sqs_message(
+                    job_id,
+                    page_number,
+                    bucket,
+                    user_email,
+                    pdf_name,
+                    page_s3_key,
+                    length_of_pdf,
+                    table,
+                )
         except Exception as db_error:
             logger.error(f"Error updating page status to FAILED: {db_error}")
 
@@ -248,6 +254,10 @@ def lambda_handler(event, context):
                             "updated_at": datetime.utcnow().isoformat(),
                             "retries": current_retries,
                             "next": "ProcessPages",
+                            "calling_gemini_for_header_extraction": False,
+                            "gemini_header_extraction_completed": False,
+                            "calling_gemini_cleaning_process": False,
+                            "gemini_cleaning_process_completed": False,
                         },
                     )
 

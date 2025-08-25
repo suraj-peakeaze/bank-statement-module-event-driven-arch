@@ -29,7 +29,7 @@ def get_items_from_record_0_table(job_id, page_number):
 
 
 def get_items_from_record_table(job_id, page_number):
-    status = ["FAILED", "COMPLETE"]
+    status = ["FAILED", "COMPLETED"]
     next = "final_aggregator"
 
     try:
